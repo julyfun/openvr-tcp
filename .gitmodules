@@ -1,0 +1,7 @@
+[submodule "third_party/openvr"]
+	path = third_party/openvr
+	url = git@github.com:ValveSoftware/openvr.git
+[submodule "third_party/poco"]
+	path = third_party/poco
+	url = https://github.com/pocoproject/poco.git
+	branch = main
