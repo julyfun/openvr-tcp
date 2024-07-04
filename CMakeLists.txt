@@ -9,11 +9,13 @@ set(CMAKE_CXX_SCAN_FOR_MODULES 14)
 add_executable(${PROJECT_NAME} src/main.cpp)
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
 
+# [Poco(system)]
 find_package(Poco REQUIRED COMPONENTS Foundation Net Util)
 message(STATUS "Poco_FOUND: ${Poco_FOUND}")
 target_include_directories(${PROJECT_NAME} PUBLIC ${Poco_INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} ${Poco_LIBRARIES})
 
+# [openvr(local)]
 target_include_directories(${PROJECT_NAME} PUBLIC
   ${PROJECT_SOURCE_DIR}/third_party/openvr/headers
 )

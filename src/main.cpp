@@ -8,13 +8,12 @@
 #include "Poco/Net/StreamSocket.h"
 #include <openvr.h>
 
-
 using namespace std;
 
 void print_mat(float m[3][4]) {
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 4; j++) {
-            printf("%f ", m[i][j]);
+            printf("%6.2f ", m[i][j]);
         }
         printf("\n");
     }
@@ -36,8 +35,43 @@ void poco() {
     }
 }
 
+void poco_v2() {
+    using namespace Poco::Net;
+    try {
+        SocketAddress address("172.24.81.239", 3001);
+        StreamSocket socket(address);
+        float data[12] = { 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 };
+        socket.sendBytes(data, sizeof(data));
+        cout << "pocov2 sent ok" << endl;
+    } catch (Poco::Exception& exc) {
+        std::cerr << "POCO Exception: " << exc.displayText() << std::endl;
+    } catch (std::exception& exc) {
+        std::cerr << "Standard Exception: " << exc.what() << std::endl;
+    }
+}
+
 class Node {
+private:
+    vr::IVRSystem* vr_system;
+    vr::TrackedDevicePose_t tracked_device_pose[vr::k_unMaxTrackedDeviceCount];
+    int tracked1_idx = -1;
+
+    Poco::Net::StreamSocket socket;
+
 public:
+    void init_socket() {
+        Poco::Net::SocketAddress sa("172.24.81.239", 3001);
+        this->socket.connect(sa);
+    }
+    void send_floats() {
+        auto pose_mat = this->get_tracker_pose_mat();
+        float data[12] = { pose_mat.m[0][0], pose_mat.m[0][1], pose_mat.m[0][2], pose_mat.m[0][3],
+                           pose_mat.m[1][0], pose_mat.m[1][1], pose_mat.m[1][2], pose_mat.m[1][3],
+                           pose_mat.m[2][0], pose_mat.m[2][1], pose_mat.m[2][2], pose_mat.m[2][3] };
+        int bytes_sent = this->socket.sendBytes(data, sizeof(data));
+        printf("bytes_sent: %d\n", bytes_sent);
+    }
+
     void init_openvr() {
         vr::EVRInitError e_error = vr::VRInitError_None;
         this->vr_system = vr::VR_Init(&e_error, vr::VRApplication_Other);
@@ -48,13 +82,53 @@ public:
             );
             return;
         }
+
+        this->vr_system->GetDeviceToAbsoluteTrackingPose(
+            vr::TrackingUniverseRawAndUncalibrated,
+            0,
+            this->tracked_device_pose,
+            vr::k_unMaxTrackedDeviceCount
+        );
+
+        // find GenericTracker's idx
+        for (size_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++) {
+            // valid
+            if (tracked_device_pose[i].bPoseIsValid) {
+                // GenericTracker
+                if (vr_system->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_GenericTracker) {
+                    this->tracked1_idx = i;
+                    break;
+                }
+            }
+        }
+        if (this->tracked1_idx == -1) {
+            printf("No GenericTracker found\n");
+            return;
+        }
+        printf("GenericTracker idx: %d\n", this->tracked1_idx);
     }
 
-    void update_pose() {
-        char dev_class_char[vr::k_unMaxTrackedDeviceCount] = {};
-        vr::VRCompositor()
-            ->WaitGetPoses(tracked_device_pose, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
+    vr::HmdMatrix34_t get_tracker_pose_mat() {
+        this->vr_system->GetDeviceToAbsoluteTrackingPose(
+            vr::TrackingUniverseRawAndUncalibrated,
+            0,
+            this->tracked_device_pose,
+            vr::k_unMaxTrackedDeviceCount
+        );
+        return this->tracked_device_pose[this->tracked1_idx].mDeviceToAbsoluteTracking;
+    }
 
+    void check_device_pose_and_type() {
+        char dev_class_char[vr::k_unMaxTrackedDeviceCount] = {};
+        // 使用这个会出现能连接的假象，Tracker 有时能找得到有时不能
+        // vr::VRCompositor()
+        //     ->WaitGetPoses(tracked_device_pose, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
+        this->vr_system->GetDeviceToAbsoluteTrackingPose(
+            vr::TrackingUniverseRawAndUncalibrated,
+            0,
+            this->tracked_device_pose,
+            vr::k_unMaxTrackedDeviceCount
+        );
         int m_iValidPoseCount = 0; // copy copy
         string m_strPoseClasses = "";
         for (size_t nDevice = 0; nDevice < vr::k_unMaxTrackedDeviceCount; ++nDevice) {
@@ -77,8 +151,7 @@ public:
                             break;
                         case vr::TrackedDeviceClass_GenericTracker:
                             dev_class_char[nDevice] = 'G';
-                            print_mat(this->tracked_device_pose[nDevice].mDeviceToAbsoluteTracking.m
-                            );
+                            print_mat(tracked_device_pose[nDevice].mDeviceToAbsoluteTracking.m);
                             break;
                         case vr::TrackedDeviceClass_TrackingReference:
                             dev_class_char[nDevice] = 'T';
@@ -93,22 +166,21 @@ public:
         }
         // num
         printf("Valid poses: %d\n", m_iValidPoseCount);
+        printf("%zu\n", strlen(m_strPoseClasses.c_str()));
         printf("PoseClasses: %s\n", m_strPoseClasses.c_str());
     };
-
-private:
-    vr::IVRSystem* vr_system;
-    vr::TrackedDevicePose_t tracked_device_pose[vr::k_unMaxTrackedDeviceCount];
 };
 
 int main() {
     puts("running well");
-    poco();
-    // Node node;
-    // node.init_openvr();
-    // while (true) {
-    //     node.update_pose();
-    //     std::this_thread::sleep_for(std::chrono::duration<float>(1));
-    // }
+    // poco();
+    Node node;
+    node.init_openvr();
+    node.init_socket();
+    while (true) {
+        puts("---");
+        node.send_floats();
+        std::this_thread::sleep_for(std::chrono::duration<float>(0.02));
+    }
     return 0;
 }
