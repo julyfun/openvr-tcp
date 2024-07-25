@@ -69,7 +69,10 @@ public:
                            pose_mat.m[1][0], pose_mat.m[1][1], pose_mat.m[1][2], pose_mat.m[1][3],
                            pose_mat.m[2][0], pose_mat.m[2][1], pose_mat.m[2][2], pose_mat.m[2][3] };
         int bytes_sent = this->socket.sendBytes(data, sizeof(data));
-        printf("bytes_sent: %d\n", bytes_sent);
+        for (int i = 0; i < 12; i++) {
+            printf("%6.2f ", data[i]);
+        }
+        puts("");
     }
 
     void init_openvr() {
