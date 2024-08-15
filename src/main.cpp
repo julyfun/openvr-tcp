@@ -53,8 +53,8 @@ void poco_v2() {
 class Node {
 private:
     vr::IVRSystem* vr_system;
-    vr::TrackedDevicePose_t tracked_device_pose[vr::k_unMaxTrackedDeviceCount];
-    int tracked1_idx = -1;
+    vr::TrackedDevicePose_t tracked_device_pose_buffer[vr::k_unMaxTrackedDeviceCount];
+    std::vector<int> trackers_idx;
 
     Poco::Net::StreamSocket socket;
 
@@ -64,15 +64,29 @@ public:
         this->socket.connect(sa);
     }
     void send_floats() {
-        auto pose_mat = this->get_tracker_pose_mat();
-        float data[12] = { pose_mat.m[0][0], pose_mat.m[0][1], pose_mat.m[0][2], pose_mat.m[0][3],
-                           pose_mat.m[1][0], pose_mat.m[1][1], pose_mat.m[1][2], pose_mat.m[1][3],
-                           pose_mat.m[2][0], pose_mat.m[2][1], pose_mat.m[2][2], pose_mat.m[2][3] };
-        int bytes_sent = this->socket.sendBytes(data, sizeof(data));
-        for (int i = 0; i < 12; i++) {
-            printf("%6.2f ", data[i]);
+        this->vr_system->GetDeviceToAbsoluteTrackingPose(
+            vr::TrackingUniverseRawAndUncalibrated,
+            0,
+            this->tracked_device_pose_buffer,
+            vr::k_unMaxTrackedDeviceCount
+        );
+        // send idx cnt
+        const int cnt = this->trackers_idx.size();
+        const int bytes_sent = this->socket.sendBytes(&cnt, sizeof(cnt));
+        printf("sent %d devices\n", cnt);
+        for (const auto i: this->trackers_idx) {
+            const auto pose_mat = this->tracked_device_pose_buffer[i].mDeviceToAbsoluteTracking;
+            float data[12] = { pose_mat.m[0][0], pose_mat.m[0][1], pose_mat.m[0][2],
+                               pose_mat.m[0][3], pose_mat.m[1][0], pose_mat.m[1][1],
+                               pose_mat.m[1][2], pose_mat.m[1][3], pose_mat.m[2][0],
+                               pose_mat.m[2][1], pose_mat.m[2][2], pose_mat.m[2][3] };
+
+            int bytes_sent = this->socket.sendBytes(data, sizeof(data));
+            for (int i = 0; i < 12; i++) {
+                printf("%6.2f ", data[i]);
+            }
+            puts("");
         }
-        puts("");
     }
 
     void init_openvr() {
@@ -89,36 +103,21 @@ public:
         this->vr_system->GetDeviceToAbsoluteTrackingPose(
             vr::TrackingUniverseRawAndUncalibrated,
             0,
-            this->tracked_device_pose,
+            this->tracked_device_pose_buffer,
             vr::k_unMaxTrackedDeviceCount
         );
 
         // find GenericTracker's idx
         for (size_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++) {
             // valid
-            if (tracked_device_pose[i].bPoseIsValid) {
-                // GenericTracker
+            if (tracked_device_pose_buffer[i].bPoseIsValid) {
+                // 获得 GenericTracker
                 if (vr_system->GetTrackedDeviceClass(i) == vr::TrackedDeviceClass_GenericTracker) {
-                    this->tracked1_idx = i;
-                    break;
+                    this->trackers_idx.push_back(i);
+                    cout << "Found GenericTracker at " << i << endl;
                 }
             }
         }
-        if (this->tracked1_idx == -1) {
-            printf("No GenericTracker found\n");
-            return;
-        }
-        printf("GenericTracker idx: %d\n", this->tracked1_idx);
-    }
-
-    vr::HmdMatrix34_t get_tracker_pose_mat() {
-        this->vr_system->GetDeviceToAbsoluteTrackingPose(
-            vr::TrackingUniverseRawAndUncalibrated,
-            0,
-            this->tracked_device_pose,
-            vr::k_unMaxTrackedDeviceCount
-        );
-        return this->tracked_device_pose[this->tracked1_idx].mDeviceToAbsoluteTracking;
     }
 
     void check_device_pose_and_type() {
@@ -129,13 +128,13 @@ public:
         this->vr_system->GetDeviceToAbsoluteTrackingPose(
             vr::TrackingUniverseRawAndUncalibrated,
             0,
-            this->tracked_device_pose,
+            this->tracked_device_pose_buffer,
             vr::k_unMaxTrackedDeviceCount
         );
         int m_iValidPoseCount = 0; // copy copy
         string m_strPoseClasses = "";
         for (size_t nDevice = 0; nDevice < vr::k_unMaxTrackedDeviceCount; ++nDevice) {
-            if (tracked_device_pose[nDevice].bPoseIsValid) {
+            if (tracked_device_pose_buffer[nDevice].bPoseIsValid) {
                 m_iValidPoseCount++;
                 // ConvertSteamVRMatrixToMatrix4(
                 //      >tracked_device_pose[nDevice].mDeviceToAbsoluteTracking
@@ -154,7 +153,9 @@ public:
                             break;
                         case vr::TrackedDeviceClass_GenericTracker:
                             dev_class_char[nDevice] = 'G';
-                            print_mat(tracked_device_pose[nDevice].mDeviceToAbsoluteTracking.m);
+                            print_mat(
+                                tracked_device_pose_buffer[nDevice].mDeviceToAbsoluteTracking.m
+                            );
                             break;
                         case vr::TrackedDeviceClass_TrackingReference:
                             dev_class_char[nDevice] = 'T';
